@@ -1,0 +1,108 @@
+volumes:
+  opsdroid_tmp:
+  opsdroid_cache:
+
+
+networks:
+  bot-net:
+    external: true
+    name: bot-net
+  proxy:
+    name: proxy
+    external: true
+
+services:
+  bot:
+    env_file:
+      - ".env"
+    build:
+      context: .
+      args:
+        VERSION: "v${OPSDROID_VERSION}"
+    image: opsdroid:${OPSDROID_VERSION}
+    container_name: bot
+    volumes:
+      - ./opsdroid_config/:/home/opsdroid/.config/opsdroid
+      - ./opsdroid_custom/:/opsdroid_custom
+      - ./modules/:/modules
+      - opsdroid_tmp:/var/tmp
+      - opsdroid_cache:/home/opsdroid/.local/share/opsdroid/site-packages
+    restart: unless-stopped
+    stdin_open: true
+    tty: true
+    ports:
+      - "${OPSDROID_PORT}:8080"
+    networks:
+      - bot-net
+      - proxy
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    container_name: bot-redis
+    env_file:
+      - ".env"
+    volumes:
+      - ./data/redis:/data
+    command:
+      - redis-server
+      - --port
+      - "${REDIS_PORT}"
+      - --requirepass
+      - "${REDIS_PASSWORD}"
+      - --appendonly
+      - yes
+    expose:
+      - "${REDIS_PORT}"
+    networks:
+      - bot-net
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "--raw", "ping" ]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
+
+  mysql:
+    image: mysql:8.0
+    container_name: bot-mysql
+    env_file:
+      - ".env"
+    volumes:
+      - "./data/mysql:/var/lib/mysql"
+    command: mysqld --default-authentication-plugin=mysql_native_password --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    expose:
+      - 3306
+    networks:
+      - bot-net
+    healthcheck:
+      test: [ "CMD", "mysqladmin", "ping", "-h", "localhost" ]
+      timeout: 20s
+      retries: 10
+
+  # redisinsight:
+  #   image: redis/redisinsight:latest
+  #   container_name: redisinsight
+  #   ports:
+  #     - 5540:5540
+  #   volumes:
+  #     - ./data/redisinsight:/db
+  #   networks:
+  #     - bot-net
+  #   restart: unless-stopped
+
+  redis-commander:
+    image: rediscommander/redis-commander:latest
+    container_name: redis-commander
+    restart: unless-stopped
+    environment:
+      - REDIS_HOSTS=local:redis:${REDIS_PORT}:0:${REDIS_PASSWORD}
+    ports:
+      - "8081:8081"
+    depends_on:
+      - redis
+    networks:
+      - bot-net

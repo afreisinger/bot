@@ -1,0 +1,6 @@
+opsdroid
+matrix-nio
+pytest
+aiohttp
+pyjwt
+httpx

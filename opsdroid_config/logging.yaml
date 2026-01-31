@@ -1,0 +1,38 @@
+version: 1
+
+formatters:
+  simple:
+    format: "%(asctime)s | %(levelname)s | %(name)s | %(message)s"
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    formatter: simple
+    level: INFO
+
+loggers:
+  # 🔇 Matrix / NIO (ruido)
+  nio:
+    level: WARNING
+  nio.events:
+    level: ERROR
+  matrix:
+    level: WARNING
+
+  # 🔇 Core Opsdroid
+  opsdroid:
+    level: WARNING
+  opsdroid.core:
+    level: WARNING
+  opsdroid.parsers:
+    level: WARNING
+
+  # 🔊 TUS SKILLS
+  opsdroid_modules.skill.autoanswer:
+    level: DEBUG
+  opsdroid_modules.skill.hello:
+    level: DEBUG
+
+root:
+  level: WARNING
+  handlers: [console]

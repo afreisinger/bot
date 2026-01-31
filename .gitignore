@@ -1,0 +1,15 @@
+.venv
+.env
+/tmp
+*__pycache__
+.vscode
+*.code-workspace
+/data/
+/opsdroid_cache
+/test/*
+.idea
+acl_data.json
+opsdroid
+./opsdroid_config/configuration.yaml
+
+
