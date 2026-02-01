@@ -3,6 +3,7 @@ import random
 import logging
 import re
 import httpx
+import json
 from datetime import datetime
 from opsdroid.skill import Skill
 from opsdroid.matchers import match_regex
@@ -16,6 +17,8 @@ SPANISH_GREETINGS = [
     "Saludos, estoy de vacaciones.",
     "Hola, estoy ocupado/a, te responderé luego."
 ]
+
+MAX_MEMORY_MESSAGES = 10  # ventana de contexto
 
 def normalize_user(user: str) -> str:
     return re.sub(r'[^a-z0-9]+', '_', user.lower()).strip('_')
@@ -31,22 +34,52 @@ def get_effective_user(message):
     return "unknown"
 
 
-async def ask_ollama_http(prompt: str, model: str = "llama3.2") -> str:
+def load_memory(redis_client, user):
+    key = f"memory:{user}"
+    raw = redis_client.get(key)
+    if not raw:
+        return []
+    try:
+        return json.loads(raw)
+    except Exception:
+        return []
+
+def save_memory(redis_client, user, messages):
+    key = f"memory:{user}"
+    redis_client.set(
+        key,
+        json.dumps(messages[-MAX_MEMORY_MESSAGES:]),
+        ex=86400  # 1 día
+    )
+
+
+
+
+
+async def ask_ollama_http(prompt: str, memory: str, model: str = "llama3.2") -> str:
     """Pregunta a Ollama usando su API HTTP /v1/completions."""
     url = f"http://ollama:11434/v1/completions"
     
+    conversation = ""
+    for m in memory:
+        role = "Usuario" if m["role"] == "user" else "Asistente"
+        conversation += f"{role}: {m['content']}\n"
+
     full_prompt = (
-    "You are a helpful assistant. Only answer in spanish.\n\n"
-    f"User say: {prompt}"
+    "Sos un asistente útil. Respondé solo en español.\n\n"
+    f"{conversation}"
+    f"Usuario: {prompt}\n"
+    "Asistente:"
     )
+    
     payload = {
         "model": model,
         "prompt": full_prompt,
-        "max_tokens": 150
+        "max_tokens": 200
     }
     try:
         async with httpx.AsyncClient() as client:
-            resp = await client.post(url, json=payload, timeout=30.0)
+            resp = await client.post(url, json=payload, timeout=30)
             resp.raise_for_status()
             data = resp.json()
             choices = data.get("choices", [])
@@ -94,12 +127,8 @@ class SpanishAutoResponse(Skill):
             if self.redis_client.exists(ollama_key):
                 _LOGGER.info(f"Usuario {effective_user} TIENE autoanswer ollama")
                 
-                n = int(self.redis_client.get(ollama_key))
-                
-                # al cambiar la logica clave vacia no existe, por lo que hay que manejarlo distinto
-                #n_bytes = self.redis_client.get(ollama_key)
-                #n = int(n_bytes) if n_bytes else 0
-                
+                n = int(self.redis_client.get(ollama_key) or 0)
+            
                 _LOGGER.info(f"Ya he contestado a {effective_user} {n} veces")
                 self.redis_client.set(ollama_key, n+1, ex=86400)
                 if n > 10:
@@ -108,7 +137,16 @@ class SpanishAutoResponse(Skill):
                     #await safe_respond(message, "He respondido muchas veces hoy, por favor espera a mañana para más respuestas.")
                     return
                 
-                answer = await ask_ollama_http(message.text, model="llama3.2")
+                # Cargar memoria previa
+                memory = load_memory(self.redis_client, normalize_user(effective_user))
+                # Rsponse de Ollama
+                answer = await ask_ollama_http(message.text, memory, model="llama3.2")
+                # Actualizar memoria
+                memory.append({"role": "user", "content": message.text})
+                memory.append({"role": "assistant", "content": answer})
+
+                save_memory(self.redis_client, normalize_user(effective_user), memory)
+
                 _LOGGER.info(answer)
                 await message.respond(answer)
                 #await safe_respond(message, answer)
