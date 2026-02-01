@@ -31,20 +31,6 @@ def get_effective_user(message):
     return "unknown"
 
 
-async def safe_respond(message, text: str):
-    """
-    Responde de forma segura incluso cuando target=None (websocketmod).
-    """
-    if message.target:
-        await message.respond(text)
-    else:
-        await message.connector.send(
-            Message(
-                text=text,
-                target="cli"
-            )
-        )
-
 async def ask_ollama_http(prompt: str, model: str = "llama3.2") -> str:
     """Pregunta a Ollama usando su API HTTP /v1/completions."""
     url = f"http://ollama:11434/v1/completions"
@@ -78,6 +64,7 @@ class SpanishAutoResponse(Skill):
         
         self.greetings = SPANISH_GREETINGS
         redis_cfg = self.config.get("redis", {})
+        
         # Conexión persistente a Redis usando tus parámetros
         self.redis_client = redis.StrictRedis(
             host=redis_cfg.get("host", "localhost"),
@@ -91,9 +78,9 @@ class SpanishAutoResponse(Skill):
         """Gestiona el saludo automático con rate-limiting por usuario."""
                 
         effective_user = get_effective_user(message)
-        autoanswer_key = f"autoanswer:{effective_user}"
-        # El comando EXISTS devuelve 1 si la clave existe
+        autoanswer_key = f"autoanswer:{normalize_user(effective_user)}"
         
+        # El comando EXISTS devuelve 1 si la clave existe
         if self.redis_client.exists(autoanswer_key):
             _LOGGER.info(f"{effective_user} TIENE autoanswer")
             greeting = random.choice(self.greetings)
@@ -102,7 +89,7 @@ class SpanishAutoResponse(Skill):
         else:
             _LOGGER.info(f"Usuario {effective_user} NO TIENE autoanswer")
            
-            ollama_key = f"ollama:{effective_user}"
+            ollama_key = f"ollama:{normalize_user(effective_user)}"
                        
             if self.redis_client.exists(ollama_key):
                 _LOGGER.info(f"Usuario {effective_user} TIENE autoanswer ollama")
@@ -142,7 +129,7 @@ class SpanishAutoResponse(Skill):
 
             today_str = datetime.today().strftime('%Y-%m-%d')
             # Generamos una clave única para la sala y el día actual
-            sent_key = f"lock:vacaciones:{today_str}:{effective_user}"
+            sent_key = f"lock:vacaciones:{today_str}:{normalize_user(effective_user)}"
 
             if not self.redis_client.exists(sent_key):
                 await message.respond(f"¡Buenas! Estoy de licencia hasta el {fecha_regreso}.")
@@ -158,7 +145,7 @@ class SpanishAutoResponse(Skill):
             _LOGGER.info(f"Procesando mensaje:\n%r {message}")
             
             connector_name = str(message.connector.name)
-            userid = str(message.user.id) if message.user and message.user.id else "unknown"
+            userid = str(message.user) if message.user else "unknown"
             target = str(message.target)
             sender = str(message.user)
             text = str(message.text)
@@ -175,7 +162,8 @@ class SpanishAutoResponse(Skill):
             joined_members,
             text
         )
-            _LOGGER.info(f"Connector:\n%r{message}")
+                
+            # Lógica para mensajes provenientes de WebSocket           
             if connector_name == "websocketmod":
                 await self.handle_vacaciones(message)
                 await self.handle_auto_answer(message)
@@ -190,11 +178,10 @@ class SpanishAutoResponse(Skill):
 
                 
                 # Solo procesar respuestas automáticas en chats privados o grupos pequeños
-                if len(jm.members) < 3:
+                if len(jm.members) < 4:
                     await self.handle_vacaciones(message)
                     await self.handle_auto_answer(message)
 
-            
 
         except Exception as e:
             _LOGGER.error(f"Error en el procesamiento del mensaje: {e}")
