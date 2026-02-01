@@ -216,7 +216,7 @@ class SpanishAutoResponse(Skill):
 
                 
                 # Solo procesar respuestas automáticas en chats privados o grupos pequeños
-                if len(jm.members) < 4:
+                if len(jm.members) < 3:
                     await self.handle_vacaciones(message)
                     await self.handle_auto_answer(message)
 
